@@ -11,6 +11,8 @@ import './bilibili/favorite.js';
 import './bilibili/history.js';
 import './bilibili/feed.js';
 import './bilibili/user-videos.js';
+import './bilibili/ranking.js';
+import './bilibili/dynamic.js';
 
 // github
 import './github/search.js';
@@ -20,6 +22,7 @@ import './zhihu/question.js';
 
 // xiaohongshu
 import './xiaohongshu/search.js';
+import './xiaohongshu/user.js';
 
 // bbc
 import './bbc/news.js';
@@ -44,3 +47,9 @@ import './ctrip/search.js';
 
 // youtube
 import './youtube/search.js';
+
+// twitter
+import './twitter/search.js';
+import './twitter/profile.js';
+
+// reddit

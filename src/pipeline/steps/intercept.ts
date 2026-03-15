@@ -14,7 +14,55 @@ export async function stepIntercept(page: IPage, params: any, data: any, args: R
 
   if (!capturePattern) return data;
 
-  // Step 1: Execute the trigger action
+  // Step 1: Inject fetch/XHR interceptor BEFORE trigger
+  await page.evaluate(`
+    () => {
+      window.__opencli_intercepted = window.__opencli_intercepted || [];
+      const pattern = ${JSON.stringify(capturePattern)};
+      
+      if (!window.__opencli_fetch_patched) {
+        const origFetch = window.fetch;
+        window.fetch = async function(...args) {
+          const reqUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+          const response = await origFetch.apply(this, args);
+          setTimeout(async () => {
+            try {
+              if (reqUrl.includes(pattern)) {
+                const clone = response.clone();
+                const json = await clone.json();
+                window.__opencli_intercepted.push(json);
+              }
+            } catch(e) {}
+          }, 0);
+          return response;
+        };
+        window.__opencli_fetch_patched = true;
+      }
+
+      if (!window.__opencli_xhr_patched) {
+        const XHR = XMLHttpRequest.prototype;
+        const open = XHR.open;
+        const send = XHR.send;
+        XHR.open = function(method, url, ...args) {
+          this._reqUrl = url;
+          return open.call(this, method, url, ...args);
+        };
+        XHR.send = function(...args) {
+          this.addEventListener('load', function() {
+            try {
+              if (this._reqUrl && this._reqUrl.includes(pattern)) {
+                window.__opencli_intercepted.push(JSON.parse(this.responseText));
+              }
+            } catch(e) {}
+          });
+          return send.apply(this, args);
+        };
+        window.__opencli_xhr_patched = true;
+      }
+    }
+  `);
+
+  // Step 2: Execute the trigger action
   if (trigger.startsWith('navigate:')) {
     const url = render(trigger.slice('navigate:'.length), { args, data });
     await page.goto(String(url));
@@ -29,36 +77,18 @@ export async function stepIntercept(page: IPage, params: any, data: any, args: R
     await page.scroll('down');
   }
 
-  // Step 2: Wait a bit for network requests to fire
+  // Step 3: Wait a bit for network requests to fire
   await page.wait(Math.min(timeout, 3));
 
-  // Step 3: Get network requests and find matching ones
-  const rawNetwork = await page.networkRequests(false);
-  const matchingResponses: any[] = [];
-
-  if (typeof rawNetwork === 'string') {
-    const lines = rawNetwork.split('\n');
-    for (const line of lines) {
-      const match = line.match(/\[?(GET|POST)\]?\s+(\S+)\s*(?:=>|→)\s*\[?(\d+)\]?/i);
-      if (match) {
-        const [, , url, status] = match;
-        if (url.includes(capturePattern) && status === '200') {
-          try {
-            const body = await page.evaluate(`
-              async () => {
-                try {
-                  const resp = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
-                  if (!resp.ok) return null;
-                  return await resp.json();
-                } catch { return null; }
-              }
-            `);
-            if (body) matchingResponses.push(body);
-          } catch {}
-        }
-      }
+  // Step 4: Retrieve captured data
+  const matchingResponses = await page.evaluate(`
+    () => {
+      const data = window.__opencli_intercepted || [];
+      window.__opencli_intercepted = []; // clear after reading
+      return data;
     }
-  }
+  `);
+
 
   // Step 4: Select from response if specified
   let result = matchingResponses.length === 1 ? matchingResponses[0] :
