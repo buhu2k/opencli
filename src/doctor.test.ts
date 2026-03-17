@@ -94,6 +94,8 @@ describe('doctor report rendering', () => {
       envFingerprint: 'fp1',
       extensionToken: 'abc123',
       extensionFingerprint: 'fp1',
+      extensionInstalled: true,
+      extensionBrowsers: ['Chrome'],
       shellFiles: [{ path: '/tmp/.zshrc', exists: true, token: 'abc123', fingerprint: 'fp1' }],
       configs: [{ path: '/tmp/mcp.json', exists: true, format: 'json', token: 'abc123', fingerprint: 'fp1', writable: true }],
       recommendedToken: 'abc123',
@@ -102,6 +104,7 @@ describe('doctor report rendering', () => {
       issues: [],
     }));
 
+    expect(text).toContain('[OK] Extension installed (Chrome)');
     expect(text).toContain('[OK] Environment token: configured (fp1)');
     expect(text).toContain('[OK] /tmp/mcp.json');
     expect(text).toContain('configured (fp1)');
@@ -113,6 +116,8 @@ describe('doctor report rendering', () => {
       envFingerprint: 'fp1',
       extensionToken: null,
       extensionFingerprint: null,
+      extensionInstalled: false,
+      extensionBrowsers: [],
       shellFiles: [{ path: '/tmp/.zshrc', exists: true, token: 'def456', fingerprint: 'fp2' }],
       configs: [{ path: '/tmp/mcp.json', exists: true, format: 'json', token: 'abc123', fingerprint: 'fp1', writable: true }],
       recommendedToken: 'abc123',
@@ -121,10 +126,50 @@ describe('doctor report rendering', () => {
       issues: ['Detected inconsistent Playwright MCP tokens across env/config files.'],
     }));
 
+    expect(text).toContain('[MISSING] Extension not installed in any browser');
     expect(text).toContain('[MISMATCH] Environment token: configured (fp1)');
     expect(text).toContain('[MISMATCH] /tmp/.zshrc');
     expect(text).toContain('configured (fp2)');
     expect(text).toContain('[MISMATCH] Recommended token fingerprint: fp1');
+  });
+
+  it('renders connectivity OK when live test succeeds', () => {
+    const text = strip(renderBrowserDoctorReport({
+      envToken: 'abc123',
+      envFingerprint: 'fp1',
+      extensionToken: 'abc123',
+      extensionFingerprint: 'fp1',
+      extensionInstalled: true,
+      extensionBrowsers: ['Chrome'],
+      shellFiles: [],
+      configs: [],
+      recommendedToken: 'abc123',
+      recommendedFingerprint: 'fp1',
+      connectivity: { ok: true, durationMs: 1234 },
+      warnings: [],
+      issues: [],
+    }));
+
+    expect(text).toContain('[OK] Browser connectivity: connected in 1.2s');
+  });
+
+  it('renders connectivity WARN when not tested', () => {
+    const text = strip(renderBrowserDoctorReport({
+      envToken: 'abc123',
+      envFingerprint: 'fp1',
+      extensionToken: 'abc123',
+      extensionFingerprint: 'fp1',
+      extensionInstalled: true,
+      extensionBrowsers: ['Chrome'],
+      shellFiles: [],
+      configs: [],
+      recommendedToken: 'abc123',
+      recommendedFingerprint: 'fp1',
+      warnings: [],
+      issues: [],
+    }));
+
+    expect(text).toContain('[WARN] Browser connectivity: not tested (use --live)');
   });
 });
 

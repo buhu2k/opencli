@@ -100,12 +100,13 @@ program.command('doctor')
   .option('--fix', 'Apply suggested fixes to shell rc and detected MCP configs', false)
   .option('-y, --yes', 'Skip confirmation prompts when applying fixes', false)
   .option('--token <token>', 'Override token to write instead of auto-detecting')
+  .option('--live', 'Test browser connectivity (requires Chrome running)', false)
   .option('--shell-rc <path>', 'Shell startup file to update')
   .option('--mcp-config <paths>', 'Comma-separated MCP config paths to scan/update')
   .action(async (opts) => {
     const { runBrowserDoctor, renderBrowserDoctorReport, applyBrowserDoctorFix } = await import('./doctor.js');
     const configPaths = opts.mcpConfig ? String(opts.mcpConfig).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined;
-    const report = await runBrowserDoctor({ token: opts.token, shellRc: opts.shellRc, configPaths, cliVersion: PKG_VERSION });
+    const report = await runBrowserDoctor({ token: opts.token, live: opts.live, shellRc: opts.shellRc, configPaths, cliVersion: PKG_VERSION });
     console.log(renderBrowserDoctorReport(report));
     if (opts.fix) {
       const written = await applyBrowserDoctorFix(report, { fix: true, yes: opts.yes, token: opts.token, shellRc: opts.shellRc, configPaths });

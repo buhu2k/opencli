@@ -16,6 +16,7 @@ const TOKEN_LINE_RE = /^(\s*export\s+PLAYWRIGHT_MCP_EXTENSION_TOKEN=)(['"]?)([^'
 export type DoctorOptions = {
   fix?: boolean;
   yes?: boolean;
+  live?: boolean;
   shellRc?: string;
   configPaths?: string[];
   token?: string;
@@ -41,16 +42,25 @@ export type McpConfigStatus = {
   parseError?: string;
 };
 
+export type ConnectivityResult = {
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+};
+
 export type DoctorReport = {
   cliVersion?: string;
   envToken: string | null;
   envFingerprint: string | null;
   extensionToken: string | null;
   extensionFingerprint: string | null;
+  extensionInstalled: boolean;
+  extensionBrowsers: string[];
   shellFiles: ShellFileStatus[];
   configs: McpConfigStatus[];
   recommendedToken: string | null;
   recommendedFingerprint: string | null;
+  connectivity?: ConnectivityResult;
   warnings: string[];
   issues: string[];
 };
@@ -393,6 +403,69 @@ function validateBase64urlToken(token: string): boolean {
 }
 
 
+/**
+ * Check whether the Playwright MCP Bridge extension is installed in any browser.
+ * Scans Chrome/Chromium/Edge Extensions directories for the known extension ID.
+ */
+export function checkExtensionInstalled(): { installed: boolean; browsers: string[] } {
+  const home = os.homedir();
+  const platform = os.platform();
+  const browserDirs: Array<{ name: string; base: string }> = [];
+
+  if (platform === 'darwin') {
+    browserDirs.push(
+      { name: 'Chrome', base: path.join(home, 'Library', 'Application Support', 'Google', 'Chrome') },
+      { name: 'Chrome Canary', base: path.join(home, 'Library', 'Application Support', 'Google', 'Chrome Canary') },
+      { name: 'Chromium', base: path.join(home, 'Library', 'Application Support', 'Chromium') },
+      { name: 'Edge', base: path.join(home, 'Library', 'Application Support', 'Microsoft Edge') },
+    );
+  } else if (platform === 'linux') {
+    browserDirs.push(
+      { name: 'Chrome', base: path.join(home, '.config', 'google-chrome') },
+      { name: 'Chromium', base: path.join(home, '.config', 'chromium') },
+      { name: 'Edge', base: path.join(home, '.config', 'microsoft-edge') },
+    );
+  } else if (platform === 'win32') {
+    const appData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    browserDirs.push(
+      { name: 'Chrome', base: path.join(appData, 'Google', 'Chrome', 'User Data') },
+      { name: 'Edge', base: path.join(appData, 'Microsoft', 'Edge', 'User Data') },
+    );
+  }
+
+  const profiles = ['Default', 'Profile 1', 'Profile 2', 'Profile 3'];
+  const foundBrowsers: string[] = [];
+
+  for (const { name, base } of browserDirs) {
+    for (const profile of profiles) {
+      const extDir = path.join(base, profile, 'Extensions', PLAYWRIGHT_EXTENSION_ID);
+      if (fileExists(extDir)) {
+        foundBrowsers.push(name);
+        break; // one match per browser is enough
+      }
+    }
+  }
+
+  return { installed: foundBrowsers.length > 0, browsers: [...new Set(foundBrowsers)] };
+}
+
+/**
+ * Test token connectivity by attempting a real MCP connection.
+ * Connects, does the JSON-RPC handshake, and immediately closes.
+ */
+export async function checkTokenConnectivity(opts?: { timeout?: number }): Promise<ConnectivityResult> {
+  const timeout = opts?.timeout ?? 8;
+  const start = Date.now();
+  try {
+    const mcp = new PlaywrightMCP();
+    await mcp.connect({ timeout });
+    await mcp.close();
+    return { ok: true, durationMs: Date.now() - start };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? String(err), durationMs: Date.now() - start };
+  }
+}
+
 export async function runBrowserDoctor(opts: DoctorOptions = {}): Promise<DoctorReport> {
   const envToken = process.env[PLAYWRIGHT_TOKEN_ENV] ?? null;
   const shellPath = opts.shellRc ?? getDefaultShellRcPath();
@@ -418,24 +491,38 @@ export async function runBrowserDoctor(opts: DoctorOptions = {}): Promise<Doctor
   const uniqueTokens = [...new Set(allTokens)];
   const recommendedToken = opts.token ?? extensionToken ?? envToken ?? (uniqueTokens.length === 1 ? uniqueTokens[0] : null) ?? null;
 
+  // Check extension installation
+  const extInstall = checkExtensionInstalled();
+
+  // Connectivity test (only when --live)
+  let connectivity: ConnectivityResult | undefined;
+  if (opts.live) {
+    connectivity = await checkTokenConnectivity();
+  }
+
   const report: DoctorReport = {
     cliVersion: opts.cliVersion,
     envToken,
     envFingerprint: getTokenFingerprint(envToken ?? undefined),
     extensionToken,
     extensionFingerprint: getTokenFingerprint(extensionToken ?? undefined),
+    extensionInstalled: extInstall.installed,
+    extensionBrowsers: extInstall.browsers,
     shellFiles,
     configs,
     recommendedToken,
     recommendedFingerprint: getTokenFingerprint(recommendedToken ?? undefined),
+    connectivity,
     warnings: [],
     issues: [],
   };
 
+  if (!extInstall.installed) report.issues.push('Playwright MCP Bridge extension is not installed in any browser.');
   if (!envToken) report.issues.push(`Current environment is missing ${PLAYWRIGHT_TOKEN_ENV}.`);
   if (!shellFiles.some(s => s.token)) report.issues.push('Shell startup file does not export PLAYWRIGHT_MCP_EXTENSION_TOKEN.');
   if (!configs.some(c => c.token)) report.issues.push('No scanned MCP config currently contains a Playwright extension token.');
   if (uniqueTokens.length > 1) report.issues.push('Detected inconsistent Playwright MCP tokens across env/config files.');
+  if (connectivity && !connectivity.ok) report.issues.push(`Browser connectivity test failed: ${connectivity.error ?? 'unknown'}`);
   for (const config of configs) {
     if (config.parseError) report.warnings.push(`Could not parse ${config.path}: ${config.parseError}`);
   }
@@ -455,6 +542,12 @@ export function renderBrowserDoctorReport(report: DoctorReport): string {
   const uniqueFingerprints = [...new Set(tokenFingerprints)];
   const hasMismatch = uniqueFingerprints.length > 1;
   const lines = [chalk.bold(`opencli v${report.cliVersion ?? 'unknown'} doctor`), ''];
+
+  const installStatus: ReportStatus = report.extensionInstalled ? 'OK' : 'MISSING';
+  const installDetail = report.extensionInstalled
+    ? `Extension installed (${report.extensionBrowsers.join(', ')})`
+    : 'Extension not installed in any browser';
+  lines.push(statusLine(installStatus, installDetail));
 
   const extStatus: ReportStatus = !report.extensionToken ? 'MISSING' : hasMismatch ? 'MISMATCH' : 'OK';
   lines.push(statusLine(extStatus, `Extension token (Chrome LevelDB): ${tokenSummary(report.extensionToken, report.extensionFingerprint)}`));
@@ -489,6 +582,18 @@ export function renderBrowserDoctorReport(report: DoctorReport): string {
   }
   if (missingConfigCount > 0) lines.push(chalk.dim(`     Other scanned config locations not present: ${missingConfigCount}`));
   lines.push('');
+
+  // Connectivity result
+  if (report.connectivity) {
+    const connStatus: ReportStatus = report.connectivity.ok ? 'OK' : 'WARN';
+    const connDetail = report.connectivity.ok
+      ? `Browser connectivity: connected in ${(report.connectivity.durationMs / 1000).toFixed(1)}s`
+      : `Browser connectivity: failed (${report.connectivity.error ?? 'unknown'})`;
+    lines.push(statusLine(connStatus, connDetail));
+  } else {
+    lines.push(statusLine('WARN', 'Browser connectivity: not tested (use --live)'));
+  }
+
   lines.push(statusLine(
     hasMismatch ? 'MISMATCH' : report.recommendedToken ? 'OK' : 'WARN',
     `Recommended token fingerprint: ${report.recommendedFingerprint ?? 'unavailable'}`,
