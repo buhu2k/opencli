@@ -34,7 +34,7 @@ npm update -g @jackwener/opencli
 
 Browser commands require:
 1. Chrome browser running **(logged into target sites)**
-2. **opencli Browser Bridge** Chrome extension installed (load `extension/` as unpacked or install from Chrome Web Store)
+2. **opencli Browser Bridge** Chrome extension installed (load `extension/` as unpacked in `chrome://extensions`)
 3. No further setup needed — the daemon auto-starts on first browser command
 
 > **Note**: You must be logged into the target website in Chrome before running commands. Tabs opened during command execution are auto-closed afterwards.

@@ -53,7 +53,9 @@ OpenCLI connects to your browser through a lightweight **Browser Bridge** Chrome
 
 ### Browser Bridge Extension Setup
 
-1. Install the **opencli Browser Bridge** extension in Chrome (from the Chrome Web Store or load the `extension/` folder as unpacked).
+1. Install the **opencli Browser Bridge** extension in Chrome:
+   - Open `chrome://extensions`, enable **Developer mode** (top-right toggle)
+   - Click **Load unpacked**, select the `extension/` folder from this repo
 2. That's it! The daemon auto-starts when you run any browser command. No tokens, no manual configuration.
 
 > **Tip**: Use `opencli doctor` for ongoing diagnosis:
@@ -254,8 +256,7 @@ npx vitest run tests/e2e/                    # E2E tests
 ## Troubleshooting
 
 - **"Extension not connected"**
-  - Ensure the opencli Browser Bridge extension is installed and **enabled** in your running Chrome.
-  - Restart Chrome if you just installed the extension.
+  - Ensure the opencli Browser Bridge extension is installed and **enabled** in `chrome://extensions`.
 - **Empty data returns or 'Unauthorized' error**
   - Your login session in Chrome might have expired. Open a normal Chrome tab, navigate to the target site, and log in or refresh the page.
 - **Node API errors**
